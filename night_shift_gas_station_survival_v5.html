@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Night Shift: Gas Station Survival</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#05070b;color:#f3f6ff;font:15px system-ui,Arial}
+#game{display:block;width:100%;height:100%;outline:none}
+#hud{position:fixed;inset:0;pointer-events:none;text-shadow:0 2px 4px #000}
+.panel{background:#080c13d9;border:1px solid #6f819b;padding:10px 13px;border-radius:7px;backdrop-filter:blur(5px)}
+#stats{position:absolute;left:16px;top:16px;line-height:1.7;min-width:170px}
+#objective{position:absolute;left:50%;top:16px;transform:translateX(-50%);text-align:center;max-width:75vw}
+#prompt{position:absolute;left:50%;top:68%;transform:translate(-50%,-50%);font-size:19px;font-weight:700;text-align:center;background:#05070bdc;padding:10px 16px;border-radius:6px}
+#cross{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:23px;color:#e7f4ff}
+#message{position:absolute;left:50%;bottom:14%;transform:translateX(-50%);background:#101723ee;border:1px solid #9ab0cc;padding:10px 16px;border-radius:6px;max-width:80vw;text-align:center}
+#start{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(#05070bd9,#05070bf2);z-index:5}
+#card{max-width:650px;margin:20px;padding:28px;background:#101722;border:1px solid #73849c;border-radius:12px;box-shadow:0 20px 80px #000}
+h1{margin:0 0 8px;font-size:clamp(26px,5vw,42px);letter-spacing:1px}
+.accent{color:#ffcb62}button{pointer-events:auto;background:#eab84e;color:#111827;font-weight:800;border:0;padding:12px 20px;border-radius:7px;font-size:16px;cursor:pointer}
+small{color:#b8c4d4}#event{color:#ff7474;font-weight:800}
+#healthbar{height:8px;background:#333;width:150px;border-radius:8px;overflow:hidden;display:inline-block;vertical-align:middle}
+#healthfill{height:100%;width:100%;background:#69d38b}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+ <div id="stats" class="panel">SHIFT 1 · 11:00 PM<br>Cash: $<span id="cash">0</span><br>Supplies: <span id="supplies">4</span><br>Health: <span id="healthbar"><span id="healthfill" style="display:block"></span></span><br>Threats survived: <span id="stopped">0</span></div>
+ <div id="objective" class="panel">NIGHT SHIFT: Keep the station open. Inspect every vehicle.</div>
+ <div id="cross">+</div><div id="prompt"></div><div id="message">Clock in, then inspect vehicles before fueling.</div>
+</div>
+<div id="start"><div id="card">
+<h1>NIGHT SHIFT: <span class="accent">GAS STATION SURVIVAL</span></h1>
+<p>You’re alone on a rainy night. Customers pay well, but some vehicles are hostile robots in disguise. Look for faction insignias before you fuel them. Hostile robots search for a limited time, then retreat.</p>
+<p><b>Controls</b><br>WASD move · Arrow keys look · E inspect / interact · F hide · Survive by staying out of sight</p>
+<p><small>Prototype game: stylized, original low-poly robots inspired by transforming-robot fiction. No downloads or accounts needed beyond this single HTML file; it loads the Three.js engine from a public CDN, so an internet connection is needed.</small></p>
+<button id="startbtn">START SHIFT</button>
+</div></div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+const canvas=document.querySelector('#game');
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.setSize(innerWidth,innerHeight);
+renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.28;
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0x101927); scene.fog=new THREE.FogExp2(0x101927,.012);
+const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.1,150);
+camera.position.set(0,1.7,7); camera.rotation.order='YXZ';
+const hemi=new THREE.HemisphereLight(0x9db9e4,0x17141b,2.2);scene.add(hemi);
+const wetGround=new THREE.MeshStandardMaterial({color:0x202833,roughness:.22,metalness:.32});
+const forecourtGloss=box(scene,0,.035,0,34,.018,26,wetGround,false);
+const moon=new THREE.DirectionalLight(0xa4bbef,2.4);moon.position.set(-10,18,8);moon.castShadow=true;scene.add(moon);
+const redGlow=new THREE.PointLight(0xff183c,28,28);redGlow.position.set(0,3,-8);scene.add(redGlow);
+const blueGlow=new THREE.PointLight(0x286bff,18,22);blueGlow.position.set(-10,3,1);scene.add(blueGlow);
+const rainGeo=new THREE.BufferGeometry(), rainCount=1100, rainPositions=new Float32Array(rainCount*3);
+for(let i=0;i<rainCount;i++){rainPositions[i*3]=(Math.random()-.5)*55;rainPositions[i*3+1]=Math.random()*24;rainPositions[i*3+2]=(Math.random()-.5)*55;}
+rainGeo.setAttribute('position',new THREE.BufferAttribute(rainPositions,3));
+const rain=new THREE.Points(rainGeo,new THREE.PointsMaterial({color:0xaac8ff,size:.045,transparent:true,opacity:.6}));scene.add(rain);
+function mat(color,rough=.8,metal=0){return new THREE.MeshStandardMaterial({color,roughness:rough,metalness:metal})}
+const concrete=mat(0x292f37), asphalt=mat(0x171c25), cream=new THREE.MeshStandardMaterial({color:0xb8b6a9,roughness:.88,metalness:.02,transparent:false,opacity:1}), red=mat(0xb12d32), glass= new THREE.MeshPhysicalMaterial({color:0x9acbe0,metalness:.05,roughness:.12,transparent:true,opacity:.22,transmission:.45,thickness:.12,side:THREE.DoubleSide,depthWrite:true}), black=mat(0x10131a,.4,.3), yellow=mat(0xf4b62c), steel=mat(0x667181,.35,.6), purple=mat(0x5428a5,.35,.5), blue=mat(0x244dba,.35,.4), green=mat(0x65b27a);
+function box(parent,x,y,z,sx,sy,sz,material,cast=true){const m=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),material);m.position.set(x,y,z);m.castShadow=cast;m.receiveShadow=true;parent.add(m);return m}
+function cylinder(parent,x,y,z,r1,r2,h,material,segments=16){const m=new THREE.Mesh(new THREE.CylinderGeometry(r1,r2,h,segments),material);m.position.set(x,y,z);m.castShadow=true;parent.add(m);return m}
+// Ground, road and forecourt
+box(scene,0,-.25,0,100,.5,100,asphalt,false);
+box(scene,0,.015,0,34,.03,26,concrete,false);
+for(let i=-14;i<=14;i+=4) box(scene,i,.04,2,.12,.025,7, yellow,false);
+// Shop building and lit windows
+// Store shell: side and rear walls are opaque, while the front is split into transparent windows and a door opening.
+box(scene,-12.35,2.5,-16, .3,5,10,cream);
+box(scene,12.35,2.5,-16, .3,5,10,cream);
+box(scene,0,2.5,-21,25,5,.3,cream);
+box(scene,0,5.1,-16,26,.4,10.5,red);
+// Transparent storefront panes sit in the front wall line; glass remains see-through.
+box(scene,-4.6,2.5,-10.88,5.8,3,.08,glass);
+box(scene,6.7,2.5,-10.88,11.2,3,.08,glass);
+// Entrance gap is x=0.8 to 2.8. Frame only, so player can actually pass through.
+box(scene,.7,1.55,-10.83,.16,3.1,.24,steel);
+box(scene,2.9,1.55,-10.83,.16,3.1,.24,steel);
+box(scene,1.8,3.08,-10.83,2.35,.16,.24,steel);
+box(scene,2.55,1.45,-10.66,.06,.28,.05,yellow);
+box(scene,0,.15,-10.55,25,.25,.6,black);
+box(scene,0,5.5,-15.87,6,.75,.18,red);
+const sign=box(scene,0,4.58,-11.87,3.5,.42,.08,mat(0xff2929)); 
+// Interior shelves and checkout counter
+box(scene,-2,1,-14,6,.9,1.2,mat(0x493b30));box(scene,-2,1.5,-13.7,5,.12,.5,black);
+for(let z=-19;z<=-12;z+=1.6){box(scene,8,1.35,z,.55,2.4,.55,steel);for(let y=.55;y<2.3;y+=.55){box(scene,7.6,y,z,.8,.1,.7,red);box(scene,8.1,y+.18,z,.35,.24,.35,y%1?yellow:green)}} 
+for(let x=-9;x<=4;x+=2.6){box(scene,x,1.25,-18,.9,2.3,.7,mat(0x4b5360));for(let y=.55;y<2.2;y+=.55)box(scene,x,y,-17.6,.72,.35,.04,y%1?yellow:green)}
+box(scene,1,1,-12,2,.15,1.5,mat(0x66503b));box(scene,1,1.8,-12,1.2,1.3,.8,mat(0x5b4938));
+for(let z=-13;z<=-10;z+=1.3){box(scene,7,1.2,z,.45,2.1,.35,steel);for(let y=.55;y<2;y+=.55)box(scene,6.7,y,z,.8,.12,.55,red)}
+// Pumps
+for(const x of [-9,-3,3,9]){box(scene,x,.85,-1,1.05,1.7,.8,yellow);box(scene,x,.9,-.56,.62,.8,.04,black);box(scene,x,.95,-.52,.4,.32,.03,green);const hose=cylinder(scene,x+.48,.72,-.2,.045,.045,.8,black);hose.rotation.z=.5;box(scene,x+.48,.4,.1,.08,.4,.08,black)}
+// Lights
+for(const [x,z] of [[-9,-3],[0,-3],[9,-3],[-6,-15],[2,-15],[8,-15]]){const l=new THREE.PointLight(0xffd88a,22,17);l.position.set(x,5,z);scene.add(l);box(scene,x,5,z,.8,.12,.5,mat(0xffe5a8),false)}
+// Distant silhouettes/buildings
+for(let i=0;i<22;i++){let x=(i%2?1:-1)*(22+Math.random()*28),z=-25+Math.random()*48;box(scene,x,2+Math.random()*5,z,4+Math.random()*5,5+Math.random()*10,5,mat(0x202838),false)}
+// Player state
+let cash=0,supplies=4,health=100,stopped=0,shift=1,clock=23*60,hiding=false,gameStarted=false,dead=false,locked=false;
+const keys={};let yaw=0,pitch=0;let currentVehicle=null,activeThreats=[],vehicles=[],eventTimer=5,vehicleTimer=2,fireCooldown=0,hiddenTime=0;
+const prompt=document.querySelector('#prompt'),message=document.querySelector('#message');
+function say(t){message.textContent=t;message.style.display='block';clearTimeout(say.timer);say.timer=setTimeout(()=>message.style.display='none',3500)}
+function updateHUD(){document.querySelector('#cash').textContent=cash;document.querySelector('#supplies').textContent=supplies;document.querySelector('#stopped').textContent=stopped;document.querySelector('#healthfill').style.width=health+'%';document.querySelector('#objective').innerHTML=`SHIFT ${shift} · ${String(Math.floor(clock/60)%24).padStart(2,'0')}:${String(clock%60).padStart(2,'0')} · <span id="event">${activeThreats.length?'THREAT ACTIVE':'Inspect vehicles carefully'}</span>`}
+function factionMark(parent,color,shape='decepticon'){// abstract faction badge, intentionally original
+ const badge=new THREE.Group();parent.add(badge);box(badge,0,.72,0,.46,.44,.06,mat(color,.4,.3));
+ const tri=new THREE.Mesh(new THREE.ConeGeometry(.15,.23,3),mat(0x090b12));tri.rotation.z=Math.PI;tri.position.set(0,.73,.04);badge.add(tri);
+ for(let i=-1;i<=1;i+=2)box(badge,i*.11,.66,.05,.045,.18,.04,mat(0x090b12));
+ return badge;
+}
+function makeCar(x,z,kind='normal',color=0x3d86be,truck=false,jet=false){
+ const g=new THREE.Group();scene.add(g);g.position.set(x,0,z);g.userData={kind,color,truck,jet,done:false,inspected:false,age:0,attacking:false};
+ const bodymat=mat(color,.35,.35);
+ if(jet){box(g,0,1.05,0,1.2,.55,3.8,bodymat);let wing=box(g,0,1,-.1,4,.12,1.25,bodymat);box(g,0,1.18,-1.5,.45,.25,1.3,steel);box(g,1.1,1,1.1,.8,.1,1.3,bodymat);box(g,-1.1,1,1.1,.8,.1,1.3,bodymat)}
+ else{box(g,0,.68,0,truck?2.1:1.8,.65,truck?4.5:3.3,bodymat);box(g,0,1.13,-.35,truck?1.8:1.45,.55,truck?1.8:1.55,glass);if(truck)box(g,0,1.45,-1.45,1.8,1.2,1.4,bodymat);
+ for(const wx of [-.98,.98])for(const wz of [-1.15,1.15]){let w=cylinder(g,wx,.38,wz,.3,.3,.18,black,12);w.rotation.z=Math.PI/2}}
+ if(kind!=='normal'){g.userData.badge=factionMark(g,kind==='decepticon'?0x9b53ff:0xff4a4a);g.userData.badge.position.set(0,1.5,1.1)}
+ g.userData.material=bodymat;vehicles.push(g);return g;
+}
+
+// Procedural hand-painted armor textures: scratches, panel seams and weathering.
+function makeArmorTexture(base, accent){
+ const c=document.createElement('canvas');c.width=256;c.height=256;
+ const ctx=c.getContext('2d');ctx.fillStyle=base;ctx.fillRect(0,0,256,256);
+ for(let i=0;i<1600;i++){const x=Math.random()*256,y=Math.random()*256,a=Math.random()*.22;ctx.fillStyle=`rgba(210,225,245,${a})`;ctx.fillRect(x,y,Math.random()*5+.4,Math.random()*2+.4);}
+ ctx.strokeStyle=accent;ctx.lineWidth=2;
+ for(let y=20;y<256;y+=48){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(256,y);ctx.stroke();}
+ for(let i=0;i<14;i++){const x=Math.random()*220,y=Math.random()*220;ctx.fillStyle=accent;ctx.fillRect(x,y,Math.random()*22+4,2);}
+ const tex=new THREE.CanvasTexture(c);tex.wrapS=tex.wrapT=THREE.RepeatWrapping;tex.colorSpace=THREE.SRGBColorSpace;return tex;
+}
+const deceptTexture=makeArmorTexture('#252631','#8e4de0');
+const autobotTexture=makeArmorTexture('#28364b','#c94850');
+const steelTexture=makeArmorTexture('#59616b','#aab7c5');
+function texturedArmor(baseMat, faction){
+ const m=baseMat.clone();m.map=faction==='decepticon'?deceptTexture:autobotTexture;
+ m.roughness=.48;m.metalness=.65;return m;
+}
+
+function makeRobot(from,kind){
+ const g=new THREE.Group();scene.add(g);g.position.copy(from.position);g.position.y=0;g.userData={kind,health:100,attack:0,from,life:18+Math.random()*10,search:0};
+ const main=texturedArmor(kind==='decepticon'?purple:blue,kind); const armorSteel=steel.clone();armorSteel.map=steelTexture;armorSteel.metalness=.72;armorSteel.roughness=.42;
+ box(g,0,1.55,0,.95,1.15,.48,main);box(g,0,2.38,0,.62,.58,.55,steel);
+ box(g,-.42,1.8,0,.25,.9,.35,steel);box(g,.42,1.8,0,.25,.9,.35,steel);
+ box(g,-.27,.68,0,.3,1,.35,steel);box(g,.27,.68,0,.3,1,.35,steel);
+ // Sculpted lower-leg armor, broad feet, and a compact vehicle-part backpack.
+ box(g,-.27,.25,.12,.43,.25,.62,main);box(g,.27,.25,.12,.43,.25,.62,main);
+ box(g,0,1.8,-.34,.72,.8,.26,black);
+ box(g,-.55,1.82,-.05,.22,.72,.3,main);box(g,.55,1.82,-.05,.22,.72,.3,main);
+ // Distinct shoulder pauldrons and angular forearm plates.
+ box(g,-.68,2.02,0,.42,.36,.52,main);box(g,.68,2.02,0,.42,.36,.52,main);
+ box(g,-.52,1.45,.12,.32,.42,.38,steel);box(g,.52,1.45,.12,.32,.42,.38,steel);
+ box(g,-.39,1.08,.14,.22,.08,.12,black);box(g,.39,1.08,.14,.22,.08,.12,black);
+ box(g,-.55,2.38,.05,.13,.12,.1,mat(0xff2020));box(g,.55,2.38,.05,.13,.12,.1,mat(0xff2020));
+ box(g,0,1.55,.31,.38,.18,.04,mat(kind==='decepticon'?0xff3b5e:0x6ff4ff));
+ // Layered armor plates, vents, shoulder panels and emissive-looking eye lamps.
+ box(g,-.42,1.95,.22,.38,.38,.18,main);box(g,.42,1.95,.22,.38,.38,.18,main);
+ box(g,-.3,1.45,.27,.22,.32,.1,steel);box(g,.3,1.45,.27,.22,.32,.1,steel);
+ box(g,0,2.52,.28,.32,.08,.06,mat(0xff233f));
+ // Character silhouette details: brow ridge, cheek guards, knee plates, finger-like claws.
+ box(g,0,2.72,-.01,.22,.18,.22,main);
+ box(g,-.22,2.35,.23,.18,.22,.18,armorSteel);box(g,.22,2.35,.23,.18,.22,.18,armorSteel);
+ box(g,-.29,.52,.32,.2,.22,.08,main);box(g,.29,.52,.32,.2,.22,.08,main);
+ for(let s of [-1,1]){box(g,s*.58,1.22,.28,.09,.25,.09,armorSteel);box(g,s*.62,1.12,.31,.07,.12,.07,main)}
+ for(let i=0;i<3;i++){box(g,-.12+i*.12,1.22,.28,.035,.14,.035,black)}
+ g.userData.parts=g.children;activeThreats.push(g);return g;
+}
+function disposeObject(o){scene.remove(o);for(let i=activeThreats.length-1;i>=0;i--)if(activeThreats[i]===o)activeThreats.splice(i,1);for(let i=vehicles.length-1;i>=0;i--)if(vehicles[i]===o)vehicles.splice(i,1)}
+function spawnVehicle(){if(vehicles.length>2)return;const r=Math.random();let kind='normal',truck=false,jet=false,color=[0x3d86be,0xd0d2d5,0x3eaa71,0xc74438][Math.floor(Math.random()*4)];
+ if(r<.24){kind=Math.random()<.55?'decepticon':'autobot';color=kind==='decepticon'?0x24202d:0x242d45}
+ else if(r<.33){truck=true;kind=Math.random()<.5?'decepticon':'normal';color=0x9b2525}
+ else if(r<.40){jet=true;kind='decepticon';color=0x34394d}
+ const v=makeCar(-13,Math.random()*6-1,kind,color,truck,jet);v.position.x=-14;v.position.z=truck?-5:(jet?-2:Math.random()*5-2);v.userData.approach=true;say(truck?'Supply truck approaching. Inspect its insignia.':jet?'Fighter jet inbound!':'A customer is pulling in. Check the vehicle before fueling.')}
+function hidePlayer(){
+ hiding=!hiding;
+ // Checkout counter is inside the shop, around z=-14. Keep the player behind it.
+ if(hiding){camera.position.set(-1.2,1.05,-12.9);say('You crouch behind the checkout counter inside the shop. Stay quiet.')}
+ else {camera.position.set(-1.2,1.7,-11.5);say('You leave the counter and step back into the shop. Watch for threats.')}
+}
+function deployMiniBots(parent, count=3){
+ const names=['Ravage','Laserbeak','Rumble','Frenzy'];
+ for(let i=0;i<count;i++){
+  const mini=new THREE.Group();scene.add(mini);mini.position.set(parent.position.x+(Math.random()-.5)*2,0,parent.position.z+(Math.random()-.5)*2);
+  const m=mat(i%2?0x282b3d:0x432b64,.35,.55);
+  box(mini,0,.45,0,.48,.45,.55,m);box(mini,0,.78,.05,.3,.22,.3,steel);
+  box(mini,-.18,.8,.22,.06,.05,.04,mat(0xff1b44));box(mini,.18,.8,.22,.06,.05,.04,mat(0xff1b44));
+  mini.userData={kind:'decepticon',health:1,attack:Math.random(),miniName:names[i%names.length],life:16+Math.random()*8};
+  activeThreats.push(mini);
+ }
+}
+function specialEvent(){
+ const r=Math.random();
+ if(r<.22){say('SOUNDWAVE SIGNAL: the shop speakers crackle. Ravage and Laserbeak are inside! Hide!');const fake={position:new THREE.Vector3(0,0,-10)};deployMiniBots(fake,2);}
+ else if(r<.43){say('SHOCKWAVE has breached the stockroom and deployed Rumble and Frenzy!');const fake={position:new THREE.Vector3(3,0,-10)};deployMiniBots(fake,2);}
+ else if(r<.60){say('BUMBLEBEE SIGNAL DETECTED: the checkout computer is being hacked! Hide until the screen resets.');const screen=box(scene,2,1.65,-10.05,.7,.45,.04,mat(0xff2448));setTimeout(()=>{scene.remove(screen);say('The terminal rebooted. The signal has vanished—for now.')},6500);}
+ else if(r<.78){
+ say('DECEPTICON FIGHTER JET INBOUND: engines overhead! Get inside and hide.');
+ const jet=makeCar(14,1,'decepticon',0x28283c,false,true);
+ jet.position.set(14,7,1);jet.userData.approach=true;jet.userData.landing=true;jet.userData.landTimer=4.5;
+ // Landing path is animated in the main loop; only transform once it reaches the forecourt.
+ }
+ else if(r<.9){say('A huge red-and-blue supply truck is approaching. It could be Optimus Prime—or a trap. Inspect it carefully.');makeCar(-5,-5,'autobot',0x9b2525,true,false);}
+ else {say('SECURITY SYSTEM COMPROMISED. The lights flicker and something is moving outside. Hide!');redGlow.intensity=55;setTimeout(()=>redGlow.intensity=28,5000);}
+}
+function inspect(v){v.userData.inspected=true;if(v.userData.kind==='normal'){say(v.userData.truck?'Supply truck looks normal. Press E again to accept supplies.':'No faction insignia spotted. Looks like a regular customer. Press E again to fuel them.')}
+ else say('HOSTILE INSIGNIA DETECTED! Do NOT fuel. Press E to refuse service and send it away.');}
+function interact(){if(dead)return;
+ if(hiding){hidePlayer();return}
+ const v=nearestVehicle();
+ if(v){if(!v.userData.inspected){inspect(v);return}
+  if(v.userData.kind!=='normal'){say('You refuse service. The hostile machine transforms anyway!');makeRobot(v,v.userData.kind);disposeObject(v);health=Math.max(0,health-5);say('Hostile transformation! Hide behind the counter or use your stun tool.');}
+  else if(v.userData.truck){supplies+=3;cash+=10;disposeObject(v);say('Supplies received. +3 supplies, +$10.');}
+  else{cash+=15;disposeObject(v);say('Customer fueled. +$15. Another vehicle is on its way.')}
+  updateHUD();return;
+ }
+ const nearest=nearestThreat();if(nearest){fireWeapon();return}
+ say('Nothing close enough to interact with. Inspect vehicles at the forecourt.')}
+function nearestVehicle(){let best=null,d=5;for(const v of vehicles){let dist=v.position.distanceTo(new THREE.Vector3(camera.position.x,0,camera.position.z));if(dist<d){d=dist;best=v}}return best}
+function nearestThreat(){let best=null,d=4;for(const e of activeThreats){let dist=e.position.distanceTo(new THREE.Vector3(camera.position.x,0,camera.position.z));if(dist<d){d=dist;best=e}}return best}
+function fireWeapon(){say('You have no weapon. Hide behind the counter and stay quiet.')}
+
+document.addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='KeyE')interact();if(e.code==='KeyF')hidePlayer();if(e.code==='Escape')document.exitPointerLock?.()});
+document.addEventListener('keyup',e=>keys[e.code]=false);
+// Arrow keys control looking so the game can be played without a mouse.
+document.addEventListener('mousedown',()=>{});
+document.querySelector('#startbtn').onclick=()=>{document.querySelector('#start').style.display='none';gameStarted=true;say('Shift started. Approach a vehicle and press E to inspect its faction symbol.');};
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+let last=performance.now(),elapsed=0;
+function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last)/1000,.04);last=now;
+const rainPos=rain.geometry.attributes.position;for(let i=0;i<rainCount;i++){rainPos.array[i*3+1]-=dt*15;if(rainPos.array[i*3+1]<0){rainPos.array[i*3+1]=24;rainPos.array[i*3]=(Math.random()-.5)*55;rainPos.array[i*3+2]=(Math.random()-.5)*55;}}rainPos.needsUpdate=true;
+if(gameStarted&&!dead){
+ elapsed+=dt;clock+=dt*1.4;const lookSpeed=1.7*dt;if(keys.ArrowLeft)yaw+=lookSpeed;if(keys.ArrowRight)yaw-=lookSpeed;if(keys.ArrowUp)pitch=Math.min(1.35,pitch+lookSpeed);if(keys.ArrowDown)pitch=Math.max(-1.35,pitch-lookSpeed);camera.rotation.set(pitch,yaw,0);if(clock>=24*60){shift++;clock=22*60;health=Math.min(100,health+20);cash+=25;say('Shift complete! +$25 bonus. The next shift is more dangerous.');}
+ fireCooldown=Math.max(0,fireCooldown-dt);vehicleTimer-=dt;eventTimer-=dt;
+ if(vehicleTimer<=0){spawnVehicle();vehicleTimer=Math.max(9,18-shift*1.5)+Math.random()*5}
+ // vehicles roll into the forecourt and stop
+ for(const v of [...vehicles]){
+ if(v.userData.landing){
+   v.userData.landTimer-=dt;
+   v.position.x+=(4-v.position.x)*dt*.7;
+   v.position.y+=(1.05-v.position.y)*dt*.65;
+   v.position.z+=(0-v.position.z)*dt*.55;
+   v.rotation.z=Math.max(-.05, v.rotation.z-dt*.12);
+   if(v.userData.landTimer<=0){
+     const faction=v.userData.kind==='autobot'?'autobot':'decepticon';
+     const pos=v.position.clone();disposeObject(v);
+     say('THE FIGHTER JET HAS LANDED AND IS TRANSFORMING! Get out of sight!');
+     const robot=makeRobot({position:pos},faction);robot.userData.life=22+Math.random()*8;
+   }
+ } else if(v.userData.approach){
+   v.position.x=Math.min(-5,v.position.x+dt*3);
+   if(v.position.x>=-5)v.userData.approach=false;
+ }
+}
+ if(eventTimer<=0){if(Math.random()<.48)specialEvent();else{const options=['A hostile signal is interfering with the station radio.','A distant jet engine roars overhead.','The security camera feed flickers.','Something heavy moves outside the shop.'];say(options[Math.floor(Math.random()*options.length)])}eventTimer=Math.max(38,55-shift*1.5)+Math.random()*28}
+ for(const e of [...activeThreats]){
+  e.userData.life-=dt;
+  const target=new THREE.Vector3(hiding?-1.2:camera.position.x,0,hiding?-13.0:camera.position.z);let dir=target.sub(e.position);let d=dir.length();
+  if(e.userData.life<=0){
+    // Hostile robots eventually withdraw from the station instead of remaining forever.
+    const exit=new THREE.Vector3(-17,0,-1);dir=exit.sub(e.position);d=dir.length();
+    if(d<1.5){disposeObject(e);say('The hostile robot has withdrawn into the darkness. The station is quiet—for now.');continue;}
+    dir.normalize();e.position.addScaledVector(dir,dt*3.8);e.rotation.y=Math.atan2(dir.x,dir.z);continue;
+  }
+  if(d>1.7){dir.normalize();e.position.addScaledVector(dir,dt*(hiding?0:1.45+shift*.12));e.rotation.y=Math.atan2(dir.x,dir.z)}else if(!hiding){e.userData.attack-=dt;if(e.userData.attack<=0){health-=10;e.userData.attack=1.25;say('You were hit! Break line of sight and hide.');if(health<=0){health=0;dead=true;document.querySelector('#start').style.display='flex';document.querySelector('#card').innerHTML='<h1>SHIFT FAILED</h1><p>The station has been overrun.</p><p>Cash earned: $'+cash+' · Threats stopped: '+stopped+'</p><button onclick="location.reload()">TRY AGAIN</button>'}}}}
+ if(!hiding){const speed=keys.ShiftLeft?8:4.8;const forward=new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));const right=new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));if(keys.KeyW)camera.position.addScaledVector(forward,speed*dt);if(keys.KeyS)camera.position.addScaledVector(forward,-speed*dt);if(keys.KeyA)camera.position.addScaledVector(right,-speed*dt);if(keys.KeyD)camera.position.addScaledVector(right,speed*dt);camera.position.x=Math.max(-18,Math.min(18,camera.position.x));camera.position.z=Math.max(-23,Math.min(12,camera.position.z));
+ // Collision against the shop shell: the front wall is blocked everywhere except the actual doorway.
+ const insideX=camera.position.x>-12.0&&camera.position.x<12.0;
+ const insideZ=camera.position.z<-10.65&&camera.position.z>-20.6;
+ if(insideX && camera.position.z < -10.65 && camera.position.z > -11.15){
+   const inDoor=camera.position.x>0.85&&camera.position.x<2.75;
+   if(!inDoor)camera.position.z=-10.55;
+ }
+ if(camera.position.z<-10.65&&camera.position.z>-20.6){
+   if(camera.position.x<=-12.0)camera.position.x=-11.8;
+   if(camera.position.x>=12.0)camera.position.x=11.8;
+ }
+ if(camera.position.z<=-20.6)camera.position.z=-20.4;
+ camera.position.y=1.7}
+ const v=nearestVehicle(),e=nearestThreat();prompt.textContent=hiding?'HIDDEN · Press F to leave cover':v?(v.userData.inspected?'E — '+(v.userData.kind==='normal'?'Fuel / accept supplies':'Refuse hostile vehicle'):'E — Inspect vehicle'):e?'F — Hide from nearby threat':'WASD move · Arrows look · E interact · F hide';
+ updateHUD();
+ }else if(!gameStarted){prompt.textContent='';}
+ renderer.render(scene,camera)}
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>
